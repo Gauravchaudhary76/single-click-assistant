@@ -34,7 +34,7 @@ interface EyeBlinkAssistantPageProps {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   onStartCamera: () => void;
   onStopCamera: () => void;
-  onSimulateGesture: (gesture: 'NEXT' | 'SELECT' | 'CANCEL' | 'EMERGENCY') => void;
+  onSimulateGesture: (gesture: string) => void;
   menuState: MenuState | null;
   onMenuStateChange: (state: MenuState) => void;
   earThreshold: number;
@@ -169,8 +169,28 @@ export const EyeBlinkAssistantPage: React.FC<EyeBlinkAssistantPageProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Columns: Large Accessible Eye-Blink Menu */}
         <div className="lg:col-span-2 space-y-4">
+          {/* Category Filter Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {['ALL', 'NEEDS', 'EMERGENCY', 'SMART ROOM', 'ENTERTAINMENT'].map((cat) => {
+              const isActive = activeCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+                    isActive
+                      ? 'bg-brand-600 text-white shadow-sm ring-2 ring-brand-300'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Active Highlight Banner */}
-          <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-5 rounded-2xl shadow-lg border border-slate-700 flex items-center justify-between">
+          <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white p-5 rounded-2xl shadow-lg border border-slate-700 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="space-y-1">
               <span className="text-[11px] uppercase tracking-wider text-brand-400 font-semibold">
                 Current Highlighted Item
@@ -183,76 +203,87 @@ export const EyeBlinkAssistantPage: React.FC<EyeBlinkAssistantPageProps> = ({
               </p>
             </div>
 
-            <div className="flex items-center space-x-2 bg-slate-800/80 px-4 py-2 rounded-xl border border-slate-700">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block mr-1"></span>
-              <span className="text-xs font-mono font-bold text-emerald-300">ACTIVE</span>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => onSimulateGesture('SELECT')}
+                className="px-4 py-2 rounded-xl bg-brand-500 hover:bg-brand-600 font-bold text-xs text-white shadow-md transition flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>Execute Now</span>
+              </button>
+              <div className="flex items-center space-x-2 bg-slate-800/80 px-3.5 py-2 rounded-xl border border-slate-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block mr-1"></span>
+                <span className="text-xs font-mono font-bold text-emerald-300">ACTIVE</span>
+              </div>
             </div>
           </div>
 
           {/* Menu Items Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            {flatItems.map((item, idx) => {
-              const isSelected = menuState?.active_index === idx;
-              const Icon = ICON_MAP[item.id] || HelpCircle;
-              const isEmergency = item.is_emergency;
+            {flatItems
+              .map((item, originalIdx) => ({ item, originalIdx }))
+              .filter(({ item }) => activeCategory === 'ALL' || item.category.toUpperCase() === activeCategory)
+              .map(({ item, originalIdx }) => {
+                const isSelected = menuState?.active_index === originalIdx;
+                const Icon = ICON_MAP[item.id] || HelpCircle;
+                const isEmergency = item.is_emergency;
 
-              let cardStyle = 'bg-white border-slate-200 hover:border-slate-300 text-slate-800';
-              if (isSelected) {
-                if (isEmergency) {
-                  cardStyle = 'bg-red-50 border-red-500 shadow-lg shadow-red-500/20 ring-4 ring-red-400/30 text-red-950 scale-[1.02]';
-                } else {
-                  cardStyle = 'bg-brand-50/80 border-brand-500 shadow-lg shadow-brand-500/20 ring-4 ring-brand-400/30 text-brand-950 scale-[1.02]';
+                let cardStyle = 'bg-white border-slate-200 hover:border-slate-300 text-slate-800';
+                if (isSelected) {
+                  if (isEmergency) {
+                    cardStyle = 'bg-red-50 border-red-500 shadow-lg shadow-red-500/20 ring-4 ring-red-400/30 text-red-950 scale-[1.02]';
+                  } else {
+                    cardStyle = 'bg-brand-50/80 border-brand-500 shadow-lg shadow-brand-500/20 ring-4 ring-brand-400/30 text-brand-950 scale-[1.02]';
+                  }
                 }
-              }
 
-              return (
-                <div
-                  key={item.id}
-                  onClick={() => {
-                    // Clicking manually jumps highlight and selects
-                    if (isSelected) {
-                      onSimulateGesture('SELECT');
-                    } else {
-                      onSimulateGesture('NEXT');
-                    }
-                  }}
-                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center space-x-4 ${cardStyle}`}
-                >
+                return (
                   <div
-                    className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition ${
-                      isSelected
-                        ? isEmergency
-                          ? 'bg-red-600 text-white'
-                          : 'bg-brand-600 text-white'
-                        : isEmergency
-                        ? 'bg-red-100 text-red-600'
-                        : 'bg-slate-100 text-slate-600'
-                    }`}
+                    key={item.id}
+                    onClick={() => {
+                      if (isSelected) {
+                        onSimulateGesture('SELECT');
+                      } else {
+                        onSimulateGesture(`SET_INDEX:${originalIdx}`);
+                      }
+                    }}
+                    className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center space-x-4 ${cardStyle}`}
                   >
-                    <Icon className="w-6 h-6" />
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                        {item.category}
-                      </span>
-                      {isSelected && (
-                        <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-brand-600 text-white uppercase">
-                          Selected
-                        </span>
-                      )}
+                    <div
+                      className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition ${
+                        isSelected
+                          ? isEmergency
+                            ? 'bg-red-600 text-white'
+                            : 'bg-brand-600 text-white'
+                          : isEmergency
+                          ? 'bg-red-100 text-red-600'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      <Icon className="w-6 h-6" />
                     </div>
-                    <p className="font-bold text-sm truncate mt-0.5">
-                      {item.label}
-                    </p>
-                    <p className="text-[11px] text-slate-500 truncate">
-                      {isSelected ? 'Medium blink to execute' : 'Short blink to move here'}
-                    </p>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          {item.category}
+                        </span>
+                        {isSelected && (
+                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-brand-600 text-white uppercase">
+                            Selected
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-bold text-sm truncate mt-0.5">
+                        {item.label}
+                      </p>
+                      <p className="text-[11px] text-slate-500 truncate">
+                        {isSelected ? 'Medium blink or click to execute' : 'Click to jump or short blink'}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
 
           {/* Gesture Instruction Guide */}

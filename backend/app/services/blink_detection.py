@@ -41,6 +41,7 @@ class BlinkDetectionService:
     def __init__(self):
         self.landmarker = None
         self.ear_threshold = 0.22
+        self.smoothed_ear: Optional[float] = None
         self.is_initialized = False
         self.init_error = None
         self.calibration_samples: List[float] = []
@@ -91,6 +92,19 @@ class BlinkDetectionService:
         except Exception as e:
             return self._fallback_response(f"Image decode error: {e}")
 
+        # CLAHE low-light enhancement when average luminance < 100
+        try:
+            gray_check = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+            if np.mean(gray_check) < 100:
+                lab = cv2.cvtColor(cv_img, cv2.COLOR_BGR2LAB)
+                l, a, b = cv2.split(lab)
+                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                cl = clahe.apply(l)
+                enhanced_lab = cv2.merge((cl, a, b))
+                cv_img = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+        except Exception:
+            pass
+
         h, w, _ = cv_img.shape
         rgb_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
 
@@ -103,6 +117,7 @@ class BlinkDetectionService:
             result = self.landmarker.detect(mp_image)
 
             if not result.face_landmarks:
+                self.smoothed_ear = None
                 return {
                     "face_detected": False,
                     "left_ear": 0.0,
@@ -112,13 +127,21 @@ class BlinkDetectionService:
                     "blink_count": gesture_classifier.blink_count,
                     "gesture_detected": None,
                     "gesture_description": None,
+                    "current_closure_ms": round(gesture_classifier.current_closure_ms, 0),
                     "landmarks_preview": []
                 }
 
             landmarks = result.face_landmarks[0]
             left_ear = calculate_ear(landmarks, LEFT_EYE_INDICES, w, h)
             right_ear = calculate_ear(landmarks, RIGHT_EYE_INDICES, w, h)
-            avg_ear = (left_ear + right_ear) / 2.0
+            raw_avg_ear = (left_ear + right_ear) / 2.0
+
+            # EMA smoothing with alpha = 0.65
+            if self.smoothed_ear is None:
+                self.smoothed_ear = raw_avg_ear
+            else:
+                self.smoothed_ear = 0.65 * raw_avg_ear + (1.0 - 0.65) * self.smoothed_ear
+            avg_ear = self.smoothed_ear
 
             # Also check blendshapes if present
             blendshape_closed = False
@@ -129,7 +152,13 @@ class BlinkDetectionService:
                 if blink_l > 0.45 and blink_r > 0.45:
                     blendshape_closed = True
 
-            eyes_closed = (avg_ear < self.ear_threshold) or blendshape_closed
+            # Hysteresis: +0.012 threshold boost when in CLOSURE_ACTIVE state
+            effective_threshold = (
+                self.ear_threshold + 0.012
+                if gesture_classifier.state == "CLOSURE_ACTIVE"
+                else self.ear_threshold
+            )
+            eyes_closed = (avg_ear < effective_threshold) or blendshape_closed
 
             eye_status, gesture, duration_ms = gesture_classifier.process_eye_state(eyes_closed, timestamp=now)
 
@@ -157,6 +186,7 @@ class BlinkDetectionService:
                 "gesture_detected": gesture,
                 "gesture_description": gesture_desc,
                 "duration_ms": round(duration_ms, 1),
+                "current_closure_ms": round(gesture_classifier.current_closure_ms, 0),
                 "landmarks_preview": preview_pts
             }
 
@@ -180,6 +210,7 @@ class BlinkDetectionService:
                 "blink_count": gesture_classifier.blink_count,
                 "gesture_detected": None,
                 "gesture_description": None,
+                "current_closure_ms": round(gesture_classifier.current_closure_ms, 0),
                 "landmarks_preview": []
             }
 
@@ -202,6 +233,7 @@ class BlinkDetectionService:
             "blink_count": gesture_classifier.blink_count,
             "gesture_detected": gesture,
             "gesture_description": f"Cascade Gesture: {gesture}" if gesture else None,
+            "current_closure_ms": round(gesture_classifier.current_closure_ms, 0),
             "landmarks_preview": []
         }
 
@@ -215,6 +247,7 @@ class BlinkDetectionService:
             "blink_count": gesture_classifier.blink_count,
             "gesture_detected": None,
             "gesture_description": error_msg,
+            "current_closure_ms": round(gesture_classifier.current_closure_ms, 0),
             "landmarks_preview": []
         }
 

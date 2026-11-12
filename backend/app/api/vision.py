@@ -97,6 +97,10 @@ async def process_frame(payload: FrameProcessRequest):
 
     if gesture == "NEXT":
         menu_state = menu_controller.navigate_next()
+        action_result = {
+            "type": "navigation",
+            "speech": menu_state["current_item"].get("spoken") or menu_state["current_item"].get("label")
+        }
         log_event(
             event_type="menu_navigation",
             description=f"Menu Highlight: {menu_state['current_item']['label']}",
@@ -113,8 +117,18 @@ async def process_frame(payload: FrameProcessRequest):
                 priority="INFO",
                 status="SUCCESS"
             )
+        else:
+            action_result = {
+                "type": "confirmation_required",
+                "speech": speech_text or "Confirm Emergency Assistance? Select again to activate."
+            }
+            log_event("gesture_classified", "Emergency Confirmation Requested", "WARNING", "WARNING")
     elif gesture == "CANCEL":
         menu_state, speech_text = menu_controller.cancel_or_back()
+        action_result = {
+            "type": "cancel",
+            "speech": speech_text
+        }
         log_event(
             event_type="menu_navigation",
             description=speech_text,
@@ -155,14 +169,41 @@ async def simulate_gesture(payload: SimulateGestureRequest):
         menu_state = menu_controller.get_state()
     elif gesture == "NEXT":
         menu_state = menu_controller.navigate_next()
-        log_event("gesture_classified", f"Manual Simulation: Next Menu Item ({menu_state['current_item']['label']})", "INFO", "INFO")
+        current_item = menu_state["current_item"]
+        action_result = {
+            "type": "navigation",
+            "speech": current_item.get("spoken") or current_item.get("label")
+        }
+        log_event("gesture_classified", f"Manual Simulation: Next Menu Item ({current_item['label']})", "INFO", "INFO")
+    elif gesture.startswith("SET_INDEX:"):
+        try:
+            target_idx = int(gesture.split(":", 1)[1])
+            menu_state = menu_controller.set_index(target_idx)
+            current_item = menu_state["current_item"]
+            action_result = {
+                "type": "index_set",
+                "speech": current_item.get("spoken") or current_item.get("label")
+            }
+            log_event("gesture_classified", f"Manual Simulation: Focused {current_item['label']}", "INFO", "INFO")
+        except (ValueError, IndexError):
+            raise HTTPException(status_code=400, detail=f"Invalid SET_INDEX parameter: {gesture}")
     elif gesture == "SELECT":
         menu_state, executed, speech_text = menu_controller.select_current()
         if executed:
             action_result = execute_menu_action(menu_state["current_item"])
             log_event("gesture_classified", f"Manual Simulation: Selected {menu_state['current_item']['label']}", "INFO", "SUCCESS")
+        else:
+            action_result = {
+                "type": "confirmation_required",
+                "speech": speech_text or "Confirm Emergency Assistance? Select again to activate."
+            }
+            log_event("gesture_classified", "Manual Simulation: Emergency Confirmation Requested", "WARNING", "WARNING")
     elif gesture == "CANCEL":
         menu_state, speech_text = menu_controller.cancel_or_back()
+        action_result = {
+            "type": "cancel",
+            "speech": speech_text
+        }
         log_event("gesture_classified", f"Manual Simulation: Cancel / Back", "INFO", "WARNING")
     else:
         raise HTTPException(status_code=400, detail=f"Unknown gesture '{gesture}'")

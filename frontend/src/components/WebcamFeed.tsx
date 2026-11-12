@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Camera, CameraOff, AlertCircle, Eye, Activity, RefreshCw } from 'lucide-react';
+import { Camera, CameraOff, AlertCircle, Eye, Activity, Clock, RefreshCw } from 'lucide-react';
 import { BlinkTelemetry } from '../types';
 
 interface WebcamFeedProps {
@@ -25,7 +25,7 @@ export const WebcamFeed: React.FC<WebcamFeedProps> = ({
 }) => {
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Draw landmark points overlay on top of webcam feed
+  // Draw connected eye-contour polygons and landmark points on top of webcam feed
   useEffect(() => {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return;
@@ -34,16 +34,38 @@ export const WebcamFeed: React.FC<WebcamFeedProps> = ({
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (telemetry.landmarks_preview && telemetry.landmarks_preview.length > 0) {
-      ctx.fillStyle = '#0ea5e9'; // brand sky blue
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 1.5;
+    if (telemetry.landmarks_preview && telemetry.landmarks_preview.length >= 12) {
+      const leftEye = telemetry.landmarks_preview.slice(0, 6);
+      const rightEye = telemetry.landmarks_preview.slice(6, 12);
 
-      telemetry.landmarks_preview.forEach(([x, y]) => {
-        const px = x * canvas.width;
-        const py = y * canvas.height;
+      [leftEye, rightEye].forEach(eye => {
         ctx.beginPath();
-        ctx.arc(px, py, 2.5, 0, 2 * Math.PI);
+        eye.forEach(([x, y], i) => {
+          const px = x * canvas.width;
+          const py = y * canvas.height;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        });
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(14, 165, 233, 0.25)';
+        ctx.fill();
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Draw landmark dots
+        ctx.fillStyle = '#0ea5e9';
+        eye.forEach(([x, y]) => {
+          ctx.beginPath();
+          ctx.arc(x * canvas.width, y * canvas.height, 2, 0, 2 * Math.PI);
+          ctx.fill();
+        });
+      });
+    } else if (telemetry.landmarks_preview && telemetry.landmarks_preview.length > 0) {
+      ctx.fillStyle = '#0ea5e9';
+      telemetry.landmarks_preview.forEach(([x, y]) => {
+        ctx.beginPath();
+        ctx.arc(x * canvas.width, y * canvas.height, 2, 0, 2 * Math.PI);
         ctx.fill();
       });
     }
@@ -51,6 +73,8 @@ export const WebcamFeed: React.FC<WebcamFeedProps> = ({
 
   const earPercent = Math.min(100, Math.max(0, (telemetry.avg_ear / 0.40) * 100));
   const thresholdPercent = Math.min(100, Math.max(0, (earThreshold / 0.40) * 100));
+  const closureMs = telemetry.current_closure_ms || 0;
+  const closurePercent = Math.min(100, Math.max(0, (closureMs / 2400) * 100));
 
   let eyeStatusColor = 'bg-slate-100 text-slate-700';
   if (telemetry.eye_status === 'Eyes Open') {
@@ -194,6 +218,60 @@ export const WebcamFeed: React.FC<WebcamFeedProps> = ({
           <span>0.00 (Closed)</span>
           <span className="text-red-600 font-semibold">▲ Threshold ({earThreshold.toFixed(2)})</span>
           <span>0.40 (Wide Open)</span>
+        </div>
+      </div>
+
+      {/* Eye Closure Hold Timer Live Progress Bar */}
+      <div className="space-y-1.5 pt-1 border-t border-slate-100">
+        <div className="flex justify-between items-center text-xs">
+          <span className="font-semibold text-slate-700 flex items-center gap-1">
+            <Clock className="w-3.5 h-3.5 text-brand-600" />
+            Eye Closure Hold Timer
+          </span>
+          <span className="font-mono text-xs font-bold text-slate-700">
+            {closureMs.toFixed(0)} ms
+            {closureMs >= 150 && closureMs <= 650 && (
+              <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 font-semibold">NEXT</span>
+            )}
+            {closureMs > 650 && closureMs <= 1800 && (
+              <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold">SELECT</span>
+            )}
+            {closureMs > 1800 && (
+              <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 font-semibold">CANCEL</span>
+            )}
+          </span>
+        </div>
+
+        {/* Multi-zone progress bar */}
+        <div className="relative w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+          {/* Background zone indicators */}
+          <div className="absolute inset-0 flex pointer-events-none opacity-40">
+            <div style={{ width: `${(150 / 2400) * 100}%` }} className="bg-slate-200" title="Debounce / Natural" />
+            <div style={{ width: `${((650 - 150) / 2400) * 100}%` }} className="bg-sky-200" title="NEXT Zone (150-650ms)" />
+            <div style={{ width: `${((1800 - 650) / 2400) * 100}%` }} className="bg-emerald-200" title="SELECT Zone (650-1800ms)" />
+            <div style={{ width: `${((2400 - 1800) / 2400) * 100}%` }} className="bg-rose-200" title="CANCEL Zone (>1900ms)" />
+          </div>
+
+          {/* Active progress fill */}
+          <div
+            className={`h-full transition-all duration-75 relative z-10 ${
+              closureMs < 150
+                ? 'bg-slate-400'
+                : closureMs <= 650
+                ? 'bg-sky-500'
+                : closureMs <= 1800
+                ? 'bg-emerald-500'
+                : 'bg-rose-500'
+            }`}
+            style={{ width: `${closurePercent}%` }}
+          />
+        </div>
+
+        <div className="flex justify-between text-[10px] text-slate-400 font-mono">
+          <span>0ms</span>
+          <span className="text-sky-600 font-semibold">NEXT (150-650ms)</span>
+          <span className="text-emerald-600 font-semibold">SELECT (650-1800ms)</span>
+          <span className="text-rose-600 font-semibold">CANCEL (&gt;1900ms)</span>
         </div>
       </div>
     </div>

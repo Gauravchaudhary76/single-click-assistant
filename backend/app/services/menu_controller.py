@@ -70,6 +70,13 @@ class MenuController:
             "flat_items": self.flat_items
         }
 
+    def set_index(self, index: int) -> Dict[str, Any]:
+        self.last_interaction_time = time.time()
+        self.pending_confirmation = None
+        if 0 <= index < len(self.flat_items):
+            self.active_index = index
+        return self.get_state()
+
     def navigate_next(self) -> Dict[str, Any]:
         self.last_interaction_time = time.time()
         self.pending_confirmation = None

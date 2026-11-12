@@ -8,7 +8,9 @@ import {
   BlinkTelemetry
 } from '../types';
 
-const API_BASE = 'http://localhost:8000/api';
+const API_BASE = typeof window !== 'undefined' && window.location.port === '8000'
+  ? '/api'
+  : `http://${typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : 'localhost'}:8000/api`;
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {

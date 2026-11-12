@@ -108,5 +108,6 @@ export interface BlinkTelemetry {
   gesture_detected?: string | null;
   gesture_description?: string | null;
   duration_ms?: number;
+  current_closure_ms?: number;
   landmarks_preview?: number[][];
 }

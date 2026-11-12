@@ -169,3 +169,76 @@ def test_demo_dataset_seeding_and_reset():
     reqs_after = client.get("/api/requests").json()
     demo_reqs_after = [r for r in reqs_after if r["is_demo"]]
     assert len(demo_reqs_after) == 0
+
+def test_sync_settings_from_db():
+    from app.main import sync_settings_from_db
+    from app.services.blink_detection import blink_detector
+    from app.services.gesture_classifier import gesture_classifier
+    from app.database.database import get_db
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE settings
+        SET ear_threshold = 0.28, short_blink_max_ms = 600, medium_blink_min_ms = 700
+        WHERE id = 1
+    """)
+    conn.commit()
+    conn.close()
+
+    sync_settings_from_db()
+    assert blink_detector.ear_threshold == 0.28
+    assert gesture_classifier.short_max_ms == 600
+    assert gesture_classifier.medium_min_ms == 700
+
+def test_gesture_closure_ms_tracking_and_no_deadzone():
+    fsm = EyeBlinkStateMachine(
+        short_min_ms=150,
+        short_max_ms=650,
+        medium_min_ms=700,
+        medium_max_ms=1800,
+        long_min_ms=2000,
+        debounce_ms=100
+    )
+
+    t0 = 2000.0
+    # Initially 0.0
+    assert fsm.current_closure_ms == 0.0
+
+    # Start closure at t0
+    fsm.process_eye_state(eyes_closed=True, timestamp=t0)
+    assert fsm.state == "CLOSURE_ACTIVE"
+
+    # Still closed at t0 + 200ms -> current_closure_ms tracks 200ms in real-time
+    fsm.process_eye_state(eyes_closed=True, timestamp=t0 + 0.20)
+    assert fsm.state == "CLOSURE_ACTIVE"
+    assert round(fsm.current_closure_ms, 0) == 200.0
+
+    # Open eyes at 350ms -> gesture NEXT detected, closure reset to 0.0
+    status, gesture, duration = fsm.process_eye_state(eyes_closed=False, timestamp=t0 + 0.35)
+    assert gesture == "NEXT"
+    assert fsm.current_closure_ms == 0.0
+
+    # Verify no deadzone between 650ms and 700ms (e.g. at 670ms)
+    t1 = t0 + 1.0
+    fsm.process_eye_state(eyes_closed=True, timestamp=t1)
+    # Reopen at 670ms: since effective_med_min = min(700, 651) = 651, 670ms classifies as SELECT
+    status, gesture, duration = fsm.process_eye_state(eyes_closed=False, timestamp=t1 + 0.67)
+    assert gesture == "SELECT"
+    assert fsm.current_closure_ms == 0.0
+
+def test_set_index_and_simulate_gesture():
+    from app.services.menu_controller import menu_controller
+
+    # Test set_index directly on MenuController
+    menu_controller.set_index(3)
+    assert menu_controller.active_index == 3
+    assert menu_controller.get_current_item()["id"] == menu_controller.flat_items[3]["id"]
+
+    # Test SET_INDEX via REST API /api/vision/simulate-gesture
+    res = client.post("/api/vision/simulate-gesture", json={"gesture": "SET_INDEX:1"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["menu_state"]["active_index"] == 1
+    assert data["menu_state"]["current_item"]["id"] == menu_controller.flat_items[1]["id"]
+

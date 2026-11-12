@@ -110,6 +110,8 @@ class FrameProcessResponse(BaseModel):
     blink_count: int
     gesture_detected: Optional[str] = None # "NEXT", "SELECT", "CANCEL", None
     gesture_description: Optional[str] = None
+    duration_ms: Optional[float] = None
+    current_closure_ms: Optional[float] = 0.0
     landmarks_preview: Optional[List[List[float]]] = None
 
 class SimulateGestureRequest(BaseModel):

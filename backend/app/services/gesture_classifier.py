@@ -32,6 +32,7 @@ class EyeBlinkStateMachine:
         self.blink_count: int = 0
         self.last_gesture: Optional[str] = None
         self.last_gesture_duration_ms: float = 0.0
+        self.current_closure_ms: float = 0.0
 
     def update_thresholds(
         self,
@@ -63,6 +64,7 @@ class EyeBlinkStateMachine:
         # Check if in cooldown
         time_since_trigger_ms = (now - self.last_trigger_time) * 1000.0
         if self.state == "COOLDOWN":
+            self.current_closure_ms = 0.0
             if time_since_trigger_ms >= self.debounce_ms:
                 self.state = "IDLE"
             else:
@@ -72,6 +74,9 @@ class EyeBlinkStateMachine:
             if eyes_closed:
                 self.state = "CLOSURE_ACTIVE"
                 self.closed_start_time = now
+                self.current_closure_ms = 0.0
+            else:
+                self.current_closure_ms = 0.0
             return status, None, 0.0
 
         elif self.state == "CLOSURE_ACTIVE":
@@ -81,27 +86,32 @@ class EyeBlinkStateMachine:
             current_duration_ms = (now - self.closed_start_time) * 1000.0
 
             # Early trigger for long closure (cancel/back) once threshold is crossed
-            if eyes_closed and current_duration_ms >= self.long_min_ms:
-                self.blink_count += 1
-                gesture = "CANCEL"
-                duration_ms = current_duration_ms
-                self.last_gesture = gesture
-                self.last_gesture_duration_ms = duration_ms
-                self.last_trigger_time = now
-                self.state = "COOLDOWN"
-                self.closed_start_time = None
-                return "Blink Detected", gesture, duration_ms
+            if eyes_closed:
+                self.current_closure_ms = current_duration_ms
+                if current_duration_ms >= self.long_min_ms:
+                    self.blink_count += 1
+                    gesture = "CANCEL"
+                    duration_ms = current_duration_ms
+                    self.last_gesture = gesture
+                    self.last_gesture_duration_ms = duration_ms
+                    self.last_trigger_time = now
+                    self.state = "COOLDOWN"
+                    self.closed_start_time = None
+                    self.current_closure_ms = 0.0
+                    return "Blink Detected", gesture, duration_ms
 
             # Eye reopened
             if not eyes_closed:
                 duration_ms = current_duration_ms
                 self.closed_start_time = None
+                self.current_closure_ms = 0.0
                 self.blink_count += 1
 
-                # Classify duration
+                # Classify duration eliminating dead-zone between short and medium
+                effective_med_min = min(self.medium_min_ms, self.short_max_ms + 1)
                 if self.short_min_ms <= duration_ms <= self.short_max_ms:
                     gesture = "NEXT"
-                elif self.medium_min_ms <= duration_ms <= self.medium_max_ms:
+                elif effective_med_min <= duration_ms <= self.medium_max_ms:
                     gesture = "SELECT"
                 elif duration_ms > self.medium_max_ms:
                     # Ambiguous duration between medium_max and long_min: treat safely as None

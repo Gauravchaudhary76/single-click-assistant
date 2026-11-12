@@ -24,7 +24,8 @@ export function useBlinkDetection({
     right_ear: 0.0,
     avg_ear: 0.0,
     eye_status: 'Camera Offline',
-    blink_count: 0
+    blink_count: 0,
+    current_closure_ms: 0
   });
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -77,6 +78,7 @@ export function useBlinkDetection({
             gesture_detected: result.gesture_detected,
             gesture_description: result.gesture_description,
             duration_ms: result.duration_ms,
+            current_closure_ms: result.current_closure_ms,
             landmarks_preview: result.landmarks_preview
           });
 
@@ -84,6 +86,9 @@ export function useBlinkDetection({
             onGesture?.(result.gesture_detected);
             if (result.gesture_detected === 'NEXT') {
               audio.playNavigationTick();
+              if (result.menu_state?.current_item) {
+                audio.speak(result.menu_state.current_item.spoken || result.menu_state.current_item.label);
+              }
             } else if (result.gesture_detected === 'SELECT') {
               audio.playSelectChime();
             }
@@ -154,7 +159,7 @@ export function useBlinkDetection({
   }, [stopCamera]);
 
   // Manual gesture triggers (for demonstration mode or simulation)
-  const simulateGesture = useCallback(async (gesture: 'NEXT' | 'SELECT' | 'CANCEL' | 'EMERGENCY') => {
+  const simulateGesture = useCallback(async (gesture: string) => {
     try {
       const res = await api.simulateGesture(gesture);
       if (gesture === 'NEXT') {
@@ -168,6 +173,9 @@ export function useBlinkDetection({
       onGesture?.(gesture);
       if (res.menu_state) {
         onMenuUpdate?.(res.menu_state);
+      }
+      if ((gesture === 'NEXT' || gesture.startsWith('SET_INDEX')) && res?.menu_state?.current_item) {
+        audio.speak(res.menu_state.current_item.spoken || res.menu_state.current_item.label);
       }
       if (res.action_result) {
         onActionResult?.(res.action_result);
